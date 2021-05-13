@@ -61,13 +61,14 @@ from pathlib import Path
 class Bootstrap:
     def __init__(self, args):
         self.__version = '2.30.4'
+        self.__gstreamer_version = '1.19.0.1'
         self.__arch = args.arch
         self.__build = args.build
         self.__debug = args.debug
         self.__root = os.getcwd()
         self.__build_dir = os.path.join(os.getcwd(), 'cerbero')
         # These are the libraries that the glue code link with, and are required during build
-        # time. These libreries go into the `imported` folder and cannot go into the `jniFolder`
+        # time. These libraries go into the `imported` folder and cannot go into the `jniFolder`
         # to avoid a duplicated library issue.
         self.__build_libs = [
             'glib-2.0',
@@ -93,6 +94,13 @@ class Bootstrap:
         self.__base_needed = set(['libWPEWebKit-1.0_3.so'])
         self.__wpewebkit_binary = 'wpewebkit-android-%s-%s.tar.xz' %(self.__arch, self.__version)
         self.__wpewebkit_runtime_binary = 'wpewebkit-android-%s-%s-runtime.tar.xz' %(self.__arch, self.__version)
+        self.__gstreamer_binary = 'gstreamer-1.0-android-%s-%s.tar.xz' %(self.__arch, self.__gstreamer_version)
+        self.__gstreamer_runtime_binary = 'gstreamer-1.0-android-%s-%s-runtime.tar.xz' %(self.__arch, self.__gstreamer_version)
+
+    def __fetch_gstreamer_binaries(self):
+        print('Fetching gstreamer binaries...')
+        gstreamer = requests.get('https://c0e792ecb2ce.ngrok.io/gstreamer-1.0-android-arm64-1.19.0.1.tar.xz', allow_redirects=True)
+        open(self.__gstreamer_binary, 'wb').write(gstreamer.content)
 
     def __fetch_binaries(self):
         assert(self.__build == False)
@@ -151,7 +159,62 @@ class Bootstrap:
             self.__patch_wk_for_debug_build()
 
     def __build_deps(self):
-        self.__cerbero_command(['package', '-f', 'wpewebkit'])
+        #self.__cerbero_command(['package', '-f', 'wpewebkit'])
+        self.__cerbero_command(['package', '-f', 'gstreamer-1.0'])
+
+    def __bundle_gstreamer(self):
+        if not self.__build:
+            return
+        print('Generating GStreamer bundle')
+        os.environ['GSTREAMER_ROOT_ANDROID'] = self.__gstreamer_root
+        ndk_project_path = os.path.join(self.__root, 'scripts', 'gstreamer')
+        os.environ['NDK_PROJECT_PATH'] = ndk_project_path
+        ndk_build = os.path.join(self.__build_dir, 'build', 'android-ndk-21', 'ndk-build')
+        subprocess.call([ndk_build, 'NDK_APPLICATION_MK=' + os.path.join(ndk_project_path, 'jni', self.__arch + '.mk')])
+
+        sysroot = os.path.join(self.__build_dir, 'sysroot')
+        lib_dir = os.path.join(sysroot, 'lib')
+        if self.__arch == 'arm64':
+            arch = 'arm64-v8a'
+        else:
+            arch = self.__arch
+        shutil.move(os.path.join(ndk_project_path, 'libs', arch, 'libgstreamer_android.so'), lib_dir)
+
+        main = os.path.join(self.__root, 'wpe', 'src', 'main')
+
+        gstreamer_init_code = os.path.join(main, 'java', 'org')
+        if os.path.exists(gstreamer_init_code):
+            shutil.rmtree(gstreamer_init_code)
+        shutil.copytree(os.path.join(self.__build_dir, 'src', 'org'), gstreamer_init_code)
+
+        ssl = os.path.join(main, 'assets', 'ssl')
+        if os.path.exists(ssl):
+            shutil.rmtree(ssl)
+        shutil.copytree(os.path.join(self.__build_dir, 'src', 'main', 'assets', 'ssl'), ssl)
+
+        # We need to override the path of the pkg-config files to point to the generated bundle
+        #tmp_pc_files = os.path.join(sysroot, 'tmp')
+        #if os.path.exists(tmp_pc_files):
+        #    shutil.rmtree(tmp_pc_files)
+        #os.makedirs(tmp_pc_files)
+        #pc_files = os.path.join(self.__gstreamer_root, self.__arch, 'lib', 'pkgconfig')
+        #for pc in Path(pc_files).glob('*pc*'):
+        #    shutil.copy(pc, os.path.join(tmp_pc_files, os.path.basename(pc)))
+        #include_dir = os.path.join(sysroot, 'include')
+        #pkgconfig_dir = os.path.join(lib_dir, 'pkgconfig')
+        #if not os.path.isdir(pkgconfig_dir):
+        #    os.mkdir(pkgconfig_dir)
+        #for pc in Path(tmp_pc_files).glob('*pc'):
+        #    with open(pc, 'r') as pc_file:
+        #        pc_contents = pc_file.read()
+        #        pc_contents = re.sub('prefix=.*', 'prefix=' + include_dir, pc_contents)
+        #        pc_contents = re.sub('libdir=.*', 'libdir=' + lib_dir, pc_contents)
+        #        pc_contents = re.sub('.* -L${.*', 'Libs: -L${libdir} -lgstreamer_android', pc_contents)
+        #        pc_contents = re.sub('Libs:.*', 'Libs: -L${libdir} -lgstreamer_android', pc_contents)
+        #        pc_contents = re.sub('Libs.private.*', 'Libs.private: -lgstreamer_android', pc_contents)
+        #    with open(pc, 'w') as pc_file:
+        #        pc_file.write(pc_contents)
+        #    shutil.move(pc, os.path.join(pkgconfig_dir, os.path.basename(pc)))
 
     def __extract_deps(self):
         os.chdir(self.__build_dir)
@@ -160,11 +223,23 @@ class Bootstrap:
             shutil.rmtree(sysroot)
         os.mkdir(sysroot)
 
+        print('Extracting dev files')
         devel_file_path = os.path.join(self.__build_dir, self.__wpewebkit_binary)
         subprocess.call(['tar', 'xf', devel_file_path, '-C', sysroot, 'include', 'lib/glib-2.0'])
 
+        print('Extracting runtime')
         runtime_file_path = os.path.join(self.__build_dir, self.__wpewebkit_runtime_binary)
         subprocess.call(['tar', 'xf', runtime_file_path, '-C', sysroot, 'lib'])
+
+        print('Extracting gstreamer')
+        self.__gstreamer_root = os.path.join(sysroot, 'gstreamer-1.0')
+        gstreamer_out_path = os.path.join(self.__gstreamer_root, self.__arch)
+        os.makedirs(gstreamer_out_path)
+        subprocess.call(['tar', 'xf', os.path.join(self.__build_dir, self.__gstreamer_binary), '-C', gstreamer_out_path])
+
+        print('Extracting gstreamer runtime')
+        self.__gstreamer_root = os.path.join(sysroot, 'gstreamer-1.0')
+        subprocess.call(['tar', 'xf', os.path.join(self.__build_dir, self.__gstreamer_runtime_binary), '-C', gstreamer_out_path])
 
     def __copy_headers(self, sysroot_dir, include_dir):
         if os.path.exists(include_dir):
@@ -214,6 +289,31 @@ class Bootstrap:
         with open(lib_path, 'wb') as lib_file:
             lib_file.write(contents)
 
+    def __replace_needed_gst_lib(self, lib_path):
+        gst_libs = [
+            'libgstadaptivedemux-1.0.so',
+            'libgstallocators-1.0.so',
+            'libgstapp-1.0.so',
+            'libgstaudio-1.0.so',
+            'libgstbadaudio-1.0.so',
+            'libgstbasecamerabinsrc-1.0.so',
+            'libgstbase-1.0.so',
+            'libgstcheck-1.0.so',
+            'libgstcodecs-1.0.so',
+            'libgstcodecparsers-1.0.so',
+            'libgstpbutils-1.0.so',
+            'libgstplay-1.0.so',
+            'libgstreamer-1.0.so',
+            'libgstsdp-1.0.so',
+            'libgstrtp-1.0.so',
+            'libgsttag-1.0.so',
+            'libgsturidownloader-1.0.so',
+            'libgstvideo-1.0.so',
+        ]
+        for gst_lib in gst_libs:
+            subprocess.call(['patchelf', '--replace-needed', gst_lib, 'libgstreamer_android.so', lib_path])
+
+
     def __copy_libs(self, sysroot_lib, lib_dir, install_list = None):
         if install_list is None:
             if os.path.exists(lib_dir):
@@ -237,6 +337,7 @@ class Bootstrap:
 
         for lib_path in Path(lib_dir).glob('*.so'):
             self.__replace_soname_values(lib_path)
+            self.__replace_needed_gst_lib(lib_path)
 
     def __copy_jni_libs(self, jni_lib_dir, lib_dir, libs_paths = None):
         if libs_paths is None:
@@ -322,6 +423,7 @@ class Bootstrap:
         else:
             self.__fetch_binaries()
         self.__extract_deps()
+        self.__bundle_gstreamer()
         self.install_deps(os.path.join(self.__build_dir, 'sysroot'))
 
 if __name__ == "__main__":

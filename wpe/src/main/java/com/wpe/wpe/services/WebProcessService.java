@@ -9,6 +9,8 @@ import android.view.Surface;
 import com.wpe.wpe.services.WPEService;
 import com.wpe.wpe.services.WebProcessGlue;
 
+import org.freedesktop.gstreamer.GStreamer;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -56,8 +58,7 @@ public class WebProcessService extends WPEService {
     }
 
     @Override
-    protected void initializeService(ParcelFileDescriptor[] fds)
-    {
+    protected void initializeService(ParcelFileDescriptor[] fds) {
         Log.v(LOGTAG, "initializeService(), got " + fds.length + " fds");
         for (int i = 0; i < fds.length; ++i) {
             Log.v(LOGTAG, " [" + i + "] fd " + fds[i].toString() + " native value " + fds[i].getFd());
@@ -81,6 +82,13 @@ public class WebProcessService extends WPEService {
         Log.i(LOGTAG, "about to start main(), surface " + surface);
         WebProcessGlue.provideSurface(surface);
         m_initialized = true;
+
+        try {
+            GStreamer.init(getBaseContext());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         WebProcessGlue.initializeMain(fds[0].detachFd(), /* fds[1].detachFd() */ -1);
     }
 

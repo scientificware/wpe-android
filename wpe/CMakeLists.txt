@@ -21,12 +21,6 @@ set_target_properties(gobject-2.0
         ${CMAKE_SOURCE_DIR}/imported/lib/${ANDROID_ABI}/libgobject-2.0.so
         )
 
-add_library(WPEWebKit-1.0 SHARED IMPORTED)
-set_target_properties(WPEWebKit-1.0
-        PROPERTIES IMPORTED_LOCATION
-        ${CMAKE_SOURCE_DIR}/imported/lib/${ANDROID_ABI}/libWPEWebKit-1.0_3.so
-        )
-
 add_library(libwpe-1.0 SHARED IMPORTED)
 set_target_properties(libwpe-1.0
         PROPERTIES IMPORTED_LOCATION
@@ -37,6 +31,12 @@ add_library(WPEBackend-default SHARED IMPORTED)
 set_target_properties(WPEBackend-default
         PROPERTIES IMPORTED_LOCATION
         ${CMAKE_SOURCE_DIR}/imported/lib/${ANDROID_ABI}/libWPEBackend-default.so
+        )
+
+add_library(WPEWebKit-1.0 SHARED IMPORTED)
+set_target_properties(WPEWebKit-1.0
+        PROPERTIES IMPORTED_LOCATION
+        ${CMAKE_SOURCE_DIR}/imported/lib/${ANDROID_ABI}/libWPEWebKit-1.0_3.so
         )
 
 include_directories(

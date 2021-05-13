@@ -13,3 +13,6 @@ wpe/src/main/assets/wpe-webkit-1.0
 *.swp
 __pycache__
 /cerbero
+scripts/gstreamer/libs
+scripts/gstreamer/obj
+wpe/src/main/java/org/

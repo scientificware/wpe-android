@@ -7,6 +7,7 @@ public class WebProcessGlue {
     static {
         System.loadLibrary("WPEBackend-default");
         System.loadLibrary("WPEWebProcessGlue");
+        System.loadLibrary("gstreamer_android");
     }
 
     public static native void initializeXdg(String xdgCachePath);
