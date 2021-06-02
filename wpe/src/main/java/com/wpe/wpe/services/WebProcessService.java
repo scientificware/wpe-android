@@ -1,6 +1,7 @@
 package com.wpe.wpe.services;
 
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.content.res.AssetManager;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
@@ -23,7 +24,10 @@ public class WebProcessService extends WPEService {
 
         try {
             Context context = getBaseContext();
+            ApplicationInfo appInfo = context.getApplicationInfo();
+
             WebProcessGlue.initializeXdg(context.getCacheDir().getAbsolutePath());
+            WebProcessGlue.initializeGioExtraModulesPath(appInfo.nativeLibraryDir);
 
             AssetManager assetManager = context.getAssets();
 

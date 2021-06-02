@@ -9,6 +9,7 @@
 extern "C" {
 JNIEXPORT void JNICALL Java_com_wpe_wpe_services_WebProcessGlue_initializeXdg(JNIEnv*, jobject, jstring);
 JNIEXPORT void JNICALL Java_com_wpe_wpe_services_WebProcessGlue_initializeFontconfig(JNIEnv*, jobject, jstring);
+JNIEXPORT void JNICALL Java_com_wpe_wpe_services_WebProcessGlue_initializeGioExtraModulesPath(JNIEnv*, jobject, jstring);
 JNIEXPORT void JNICALL Java_com_wpe_wpe_services_WebProcessGlue_initializeMain(JNIEnv*, jobject, jint, jint);
 }
 
@@ -32,6 +33,17 @@ Java_com_wpe_wpe_services_WebProcessGlue_initializeFontconfig(JNIEnv* env, jobje
     ALOGV("  pathLength %d, pathChars %s", pathLength, pathChars);
 
     setenv("FONTCONFIG_PATH", pathChars, 1);
+}
+
+JNIEXPORT void JNICALL
+Java_com_wpe_wpe_services_WebProcessGlue_initializeGioExtraModulesPath(JNIEnv* env, jobject, jstring extraModulesPath)
+{
+    ALOGV("Glue::initializeGIOExtraModulesPath(), path %p", extraModulesPath);
+    jsize pathLength = env->GetStringUTFLength(extraModulesPath);
+    const char* pathChars = env->GetStringUTFChars(extraModulesPath, 0);
+    ALOGV("  pathLength %d, pathChars %s", pathLength, pathChars);
+
+    setenv("GIO_EXTRA_MODULES", pathChars, 1);
 }
 
 using WebProcessEntryPoint = int(int, char**);

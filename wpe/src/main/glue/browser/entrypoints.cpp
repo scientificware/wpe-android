@@ -13,6 +13,7 @@
 
 extern "C" {
     JNIEXPORT void JNICALL Java_com_wpe_wpe_BrowserGlue_initLooperHelper(JNIEnv*, jobject);
+    JNIEXPORT void JNICALL Java_com_wpe_wpe_BrowserGlue_initializeGioExtraModulesPath(JNIEnv*, jobject, jstring);
     JNIEXPORT void JNICALL Java_com_wpe_wpe_BrowserGlue_init(JNIEnv*, jobject, jobject);
     JNIEXPORT void JNICALL Java_com_wpe_wpe_BrowserGlue_initLooperHelper(JNIEnv*, jobject);
     JNIEXPORT void JNICALL Java_com_wpe_wpe_BrowserGlue_deinit(JNIEnv*, jobject);
@@ -42,6 +43,17 @@ std::unique_ptr<Browser> Browser::m_instance = nullptr;
 // These are used by WebKit to call into the Java layer.
 JNIEXPORT JNIEnv* s_BrowserGlue_env = 0;
 JNIEXPORT jobject s_BrowserGlue_object = 0;
+
+JNIEXPORT void JNICALL
+Java_com_wpe_wpe_BrowserGlue_initializeGioExtraModulesPath(JNIEnv* env, jobject, jstring extraModulesPath)
+{
+    ALOGV("Glue::initializeGIOExtraModulesPath(), path %p", extraModulesPath);
+    jsize pathLength = env->GetStringUTFLength(extraModulesPath);
+    const char* pathChars = env->GetStringUTFChars(extraModulesPath, 0);
+    ALOGV("  pathLength %d, pathChars %s", pathLength, pathChars);
+
+    setenv("GIO_EXTRA_MODULES", pathChars, 1);
+}
 
 JNIEXPORT void JNICALL
 Java_com_wpe_wpe_BrowserGlue_init(JNIEnv* env, jobject, jobject glueObj)

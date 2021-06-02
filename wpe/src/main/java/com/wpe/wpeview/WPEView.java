@@ -37,6 +37,10 @@ public class WPEView extends FrameLayout implements ViewObserver {
     private String m_url = "about:blank";
     private String m_originalUrl = "about:blank";
 
+    public static void initialize(Context context) {
+        Browser.initialize(context);
+    }
+
     public WPEView(final Context context) {
         super(context);
         m_context = context;

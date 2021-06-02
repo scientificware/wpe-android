@@ -1,6 +1,7 @@
 package com.wpe.wpe;
 
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.os.LimitExceededException;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
@@ -280,6 +281,11 @@ public final class Browser {
         m_looperHelperThread = new LooperHelperThread();
         m_uiProcessThread = new UIProcessThread();
         m_uiProcessThread.run(m_glue);
+    }
+
+    public static void initialize(Context context) {
+        ApplicationInfo appInfo = context.getApplicationInfo();
+        BrowserGlue.initializeGioExtraModulesPath(appInfo.nativeLibraryDir);
     }
 
     public static Browser getInstance() {
