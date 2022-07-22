@@ -68,6 +68,7 @@ static const char* s_fragmentShaderSource =
 
 void RendererFallback::surfaceCreated(ANativeWindow* window)
 {
+    ALOGV("RendererFallback::surfaceCreated() window %p size (%ux%u)", window, m_size.width, m_size.height);
     if (m_egl.context != EGL_NO_CONTEXT) {
         surfaceDestroyed();
     }

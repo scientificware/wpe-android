@@ -313,6 +313,8 @@ public final class Browser
         if (m_webProcess != null) {
             m_webProcess.setActivePage(page);
         }
+
+        page.init();
         loadPendingUrls(wpeView);
     }
 

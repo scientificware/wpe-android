@@ -3,8 +3,12 @@ package com.wpe.wpe;
 import android.content.Context;
 import android.content.Intent;
 import android.os.ParcelFileDescriptor;
-import android.os.Parcelable;
 import android.util.Log;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
+import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.inputmethod.InputMethodManager;
 
 import androidx.annotation.Keep;
@@ -12,12 +16,8 @@ import androidx.annotation.NonNull;
 import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
 
-import com.wpe.wpe.gfx.WPESurfaceView;
 import com.wpe.wpe.services.WPEServiceConnection;
 import com.wpe.wpeview.WPEView;
-
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * A Page roughly corresponds with a tab in a regular browser UI.
@@ -47,15 +47,135 @@ public class Page
     private final int m_width;
     private final int m_height;
 
-    private WPESurfaceView m_view;
-    private boolean m_viewReady = false;
-
-    private boolean m_pageGlueReady = false;
-
-    private String m_pendingLoad;
+    private PageSurfaceView m_surfaceView;
 
     private boolean m_canGoBack = true;
     private boolean m_canGoForward = true;
+
+    private ScaleGestureDetector m_scaleDetector;
+    private boolean m_ignoreTouchEvent = false;
+
+    private long m_nativePtr;
+    private native void nativeInit(int pageId, int width, int height);
+    private native void nativeClose();
+    private native void nativeDestroy();
+    private native void nativeLoadUrl(String url);
+    private native void nativeGoBack();
+    private native void nativeGoForward();
+    private native void nativeStopLoading();
+    private native void nativeReload();
+
+    private native void nativeSurfaceCreated(Surface surface);
+    private native void nativeSurfaceDestroyed();
+    private native void nativeSurfaceChanged(int format, int width, int height);
+    private native void nativeSurfaceRedrawNeeded();
+
+    private native void nativeSetZoomLevel(double zoomLevel);
+
+    private native void nativeOnTouchEvent(long time, int type, float x, float y);
+
+    private native void nativeSetInputMethodContent(char c);
+    private native void nativeDeleteInputMethodContent(int offset);
+
+    private native void nativeRequestExitFullscreenMode();
+
+    private native void nativeUpdateAllSettings(PageSettings settings);
+
+    private class PageSurfaceHolderCallback implements SurfaceHolder.Callback2
+    {
+        @Override
+        public void surfaceCreated(SurfaceHolder holder)
+        {
+            Log.d(LOGTAG, "PageSurfaceHolderCallback::surfaceCreated()");
+            nativeSurfaceCreated(holder.getSurface());
+        }
+
+        @Override
+        public void surfaceDestroyed(SurfaceHolder holder)
+        {
+            Log.d(LOGTAG, "PageSurfaceHolderCallback::surfaceDestroyed()");
+            nativeSurfaceDestroyed();
+        }
+
+        @Override
+        public void surfaceChanged(SurfaceHolder holder, int format, int width, int height)
+        {
+            Log.d(LOGTAG, "PageSurfaceHolderCallback::surfaceChanged() format " + format + " (" + width + "," + height + ")");
+
+            nativeSurfaceChanged(format, width, height);
+        }
+
+        @Override
+        public void surfaceRedrawNeeded(SurfaceHolder holder)
+        {
+            Log.d(LOGTAG, "PageSurfaceHolderCallback::surfaceRedrawNeeded()");
+            nativeSurfaceRedrawNeeded();
+        }
+    }
+
+    private class PageScaleListener extends ScaleGestureDetector.SimpleOnScaleGestureListener
+    {
+        private float m_scaleFactor = 1.f;
+
+        @Override
+        public boolean onScale(ScaleGestureDetector detector)
+        {
+            Log.d(LOGTAG, "PageScaleListener::onScale()");
+
+            m_scaleFactor *= detector.getScaleFactor();
+
+            m_scaleFactor = Math.max(0.1f, Math.min(m_scaleFactor, 5.0f));
+
+            nativeSetZoomLevel(m_scaleFactor);
+
+            m_ignoreTouchEvent = true;
+
+            return true;
+        }
+    }
+
+    public class PageSurfaceView extends SurfaceView
+    {
+        public PageSurfaceView(Context context)
+        {
+            super(context);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event)
+        {
+            int pointerCount = event.getPointerCount();
+            if (pointerCount < 1) {
+                return false;
+            }
+
+            m_scaleDetector.onTouchEvent(event);
+
+            if (m_ignoreTouchEvent) {
+                m_ignoreTouchEvent = false;
+            }
+
+            int eventType;
+
+            int eventAction = event.getActionMasked();
+            switch (eventAction) {
+            case MotionEvent.ACTION_DOWN:
+                eventType = 0;
+                break;
+            case MotionEvent.ACTION_MOVE:
+                eventType = 1;
+                break;
+            case MotionEvent.ACTION_UP:
+                eventType = 2;
+                break;
+            default:
+                return false;
+            }
+
+            nativeOnTouchEvent(event.getEventTime(), eventType, event.getX(0), event.getY(0));
+            return true;
+        }
+    }
 
     public Page(@NonNull Browser browser, @NonNull Context context, @NonNull WPEView wpeView, int pageId)
     {
@@ -72,11 +192,28 @@ public class Page
         m_width = wpeView.getMeasuredWidth();
         m_height = wpeView.getMeasuredHeight();
 
-        m_view = new WPESurfaceView(m_context, pageId, wpeView);
-        m_wpeView.onSurfaceViewCreated(m_view);
-        onViewReady();
+        m_surfaceView = new PageSurfaceView(m_context);
+        if (m_wpeView.getSurfaceClient() != null) {
+            m_wpeView.getSurfaceClient().addCallback(wpeView, new PageSurfaceHolderCallback());
+        } else {
+            SurfaceHolder holder = m_surfaceView.getHolder();
+            Log.d(LOGTAG, "Page surface holder " + holder);
+            holder.addCallback(new PageSurfaceHolderCallback());
+        }
+        m_surfaceView.requestLayout();
 
-        ensurePageGlue();
+        m_scaleDetector = new ScaleGestureDetector(context, new PageScaleListener());
+    }
+
+    public void init()
+    {
+        nativeInit(m_id, m_width, m_height);
+
+        m_wpeView.onPageSurfaceViewCreated(m_surfaceView);
+        m_wpeView.onPageSurfaceViewReady(m_surfaceView);
+
+        updateAllSettings();
+        m_wpeView.getSettings().getPageSettings().setPage(this);
     }
 
     public void close()
@@ -86,48 +223,21 @@ public class Page
         }
         m_closed = true;
         Log.v(LOGTAG, "Page destruction");
-        BrowserGlue.closePage(m_id);
-        m_pageGlueReady = false;
+        nativeClose();
     }
 
-    /**
-     * Callback triggered when the Page glue is ready and the associated WebKitWebView
-     * instance is created.
-     * This is called by the JNI layer. See `Java_com_wpe_wpe_BrowserGlue_newPage`
-     */
-    @Keep
-    public void onPageGlueReady()
+    public void destroy()
     {
-        Log.v(LOGTAG, "WebKitWebView ready " + m_pageGlueReady);
-        m_pageGlueReady = true;
-
-        updateAllSettings();
-        m_wpeView.getSettings().getPageSettings().setPage(this);
-
-        if (m_viewReady) {
-            loadUrlInternal();
-        }
+        close();
+        nativeDestroy();
     }
 
-    private void ensurePageGlue()
-    {
-        if (m_pageGlueReady) {
-            onPageGlueReady();
-            return;
-        }
-
-        // Requests the creation of a new WebKitWebView. On creation, the `onPageGlueReady` callback
-        // is triggered.
-        BrowserGlue.newPage(this, m_id, m_width, m_height);
-    }
-
-    public void onViewReady()
-    {
-        Log.d(LOGTAG, "onViewReady");
-        m_wpeView.onSurfaceViewReady(m_view);
-        m_viewReady = true;
-        if (m_pageGlueReady) {
-            loadUrlInternal();
+    @Override
+    protected void finalize() throws Throwable {
+        try {
+            destroy();
+        } finally {
+            super.finalize();
         }
     }
 
@@ -163,25 +273,10 @@ public class Page
         // FIXME: Until we fully support PSON, we won't do anything here.
     }
 
-    public WPESurfaceView view()
-    {
-        return m_view;
-    }
-
-    private void loadUrlInternal()
-    {
-        if (m_pendingLoad == null) {
-            return;
-        }
-        BrowserGlue.loadURL(m_id, m_pendingLoad);
-        m_pendingLoad = null;
-    }
-
     public void loadUrl(@NonNull Context context, @NonNull String url)
     {
-        Log.d(LOGTAG, "Queue URL load " + url);
-        m_pendingLoad = url;
-        ensurePageGlue();
+        Log.d(LOGTAG, "loadUrl " + url);
+        nativeLoadUrl(url);
     }
 
     public void onLoadChanged(int loadEvent)
@@ -218,7 +313,7 @@ public class Page
     private void dismissKeyboard()
     {
         InputMethodManager imm = (InputMethodManager)m_context.getSystemService(Context.INPUT_METHOD_SERVICE);
-        imm.hideSoftInputFromWindow(m_view.getWindowToken(), 0);
+        imm.hideSoftInputFromWindow(m_surfaceView.getWindowToken(), 0);
     }
 
     public void onInputMethodContextOut()
@@ -240,9 +335,7 @@ public class Page
 
     public void requestExitFullscreenMode()
     {
-        if (m_pageGlueReady) {
-            BrowserGlue.requestExitFullscreenMode(m_id);
-        }
+        nativeRequestExitFullscreenMode();
     }
 
     public boolean canGoBack()
@@ -257,48 +350,36 @@ public class Page
 
     public void goBack()
     {
-        if (m_pageGlueReady) {
-            BrowserGlue.goBack(m_id);
-        }
+        nativeGoBack();
     }
 
     public void goForward()
     {
-        if (m_pageGlueReady) {
-            BrowserGlue.goForward(m_id);
-        }
+        nativeGoForward();
     }
 
     public void stopLoading()
     {
-        if (m_pageGlueReady) {
-            BrowserGlue.stopLoading(m_id);
-        }
+        nativeStopLoading();
     }
 
     public void reload()
     {
-        if (m_pageGlueReady) {
-            BrowserGlue.reload(m_id);
-        }
+        nativeReload();
     }
 
     public void setInputMethodContent(char c)
     {
-        if (m_pageGlueReady) {
-            BrowserGlue.setInputMethodContent(m_id, c);
-        }
+        nativeSetInputMethodContent(c);
     }
 
     public void deleteInputMethodContent(int offset)
     {
-        if (m_pageGlueReady) {
-            BrowserGlue.deleteInputMethodContent(m_id, offset);
-        }
+        nativeDeleteInputMethodContent(offset);
     }
 
     void updateAllSettings()
     {
-        BrowserGlue.updateAllPageSettings(m_id, m_wpeView.getSettings().getPageSettings());
+        nativeUpdateAllSettings(m_wpeView.getSettings().getPageSettings());
     }
 }

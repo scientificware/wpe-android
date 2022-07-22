@@ -26,6 +26,8 @@ public:
     Page(const Page&) = delete;
     Page& operator=(const Page&) = delete;
 
+    virtual ~Page();
+
     void init();
     void close();
 
